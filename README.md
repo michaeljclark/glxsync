@@ -1,11 +1,20 @@
-# gl2_xsync
+# glxsync
 
-An example X Windows OpenGL application using GLX and XSync extended
-frame synchronization. This demo responds to synchronization requests
-from the compositor in response to configuration changes, and updates
-extended synchronization counters before and after frames to signal to
-the compositor that rendering is in progress so that buffers read by the
-compositor are complete and match the size in configuration change events.
+_glxsync_ demonstrates extended frame synchronization for OpenGL, GLX
+and Xlib apps targetting Xorg or Wayland.
+
+![glxsync](/images/glxsync.png)
+
+## Introduction
+
+_glxsync_ is an X Windows OpenGL application using GLX and XSync extended
+frame synchronization.
+
+This demo responds to synchronization requests from the compositor in
+response to configuration changes, and updates extended synchronization
+counters before and after frames to signal to the compositor that rendering
+is in progress so that buffers read by the compositor are complete and
+match the size in configuration change events.
 
 This allows the compositor to synchronize rendering of window decorations
 with rendering of the client area to eliminate tearing during resize.
@@ -25,7 +34,7 @@ The demo depends on the following X11 window property atoms:
 
 ```
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake': cmake --build build -- --verbose
+cmake --build build -- --verbose
 ```
 
 ## Profile
@@ -35,7 +44,7 @@ CPUPROFILE=prof.out LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libprofiler.so ./build/
 google-pprof --text build/gl2_xsync prof.out
 ```
 
-## X11 Notes
+## References
 
 Frame Synchronization
 - https://fishsoup.net/misc/wm-spec-synchronization.html
