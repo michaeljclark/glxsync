@@ -82,8 +82,11 @@ static Atom *supported_atoms;
 static long num_supported_atoms;
 static int xsync_event_base;
 static int xsync_error_base;
-static int have_sync;
-static int have_moveresize;
+
+static int have_xsync_extension;
+static int have_net_supported;
+static int have_wm_moveresize;
+static int use_frame_sync = 1;
 
 /*
  * glcube demo
@@ -414,9 +417,8 @@ static void update_wm_supported(Display *d, int s)
                        &num_supported_atoms, &bytes_after,
                        (unsigned char **)&supported_atoms);
 
-    assert(type == XA_ATOM);
-    assert(supported_atoms);
-    assert(num_supported_atoms);
+    have_net_supported = (type == XA_ATOM && supported_atoms != NULL &&
+                      num_supported_atoms > 0);
 
     for (int i = 0; i < num_supported_atoms; i++) {
         Trace("Atom: %s (%ld)\n",
@@ -426,6 +428,8 @@ static void update_wm_supported(Display *d, int s)
 
 static int check_wm_supported(Atom atom)
 {
+    if (!have_net_supported) return 0;
+
     for (int i = 0; i < num_supported_atoms; i++) {
         if (supported_atoms[i] == atom)return 1;
     }
@@ -455,8 +459,11 @@ static void sync_init(Display *d, Window w)
     XID counters[2];
     int major, minor;
 
-    have_sync = (XSyncQueryExtension(d, &xsync_event_base, &xsync_error_base) &&
-                 XSyncInitialize(d, &major, &minor));
+    have_xsync_extension =
+        (XSyncQueryExtension(d, &xsync_event_base, &xsync_error_base) &&
+         XSyncInitialize(d, &major, &minor));
+
+    if (!have_xsync_extension) return;
 
     XSyncIntToValue (&value, 0);
     update_counter = XSyncCreateCounter(d, value);
@@ -472,6 +479,8 @@ static void sync_init(Display *d, Window w)
 static void sync_counter(Display *d, XSyncCounter counter, ulong value)
 {
     XSyncValue sync_value;
+
+    if (!have_xsync_extension) return;
 
     XSyncIntsToValue(&sync_value, value & 0xFFFFFFFF, value >> 32);
     XSyncSetCounter(d, counter, sync_value);
@@ -530,12 +539,11 @@ static void submit_frame(Display *d, Window w, frame_disposition disposition,
 {
     current_time = get_time_microseconds();
 
-    /* tearing may result if 'normal' frames are submitted before
-     * receiving timings for inflight 'urgent' frames submitted
-     * in response to synchronization requests, so we delay them. */
-    if (disposition == frame_normal && timing_sync_serial > 0 &&
-        timing_sync_serial < inflight_sync_serial)
+    /* tearing may result if frames are submitted before receiving timings
+     * for inflight frames submitted in response to synchronization requests */
+    if (timing_sync_serial > 0 && timing_sync_serial < inflight_sync_serial)
     {
+        XSync(d, False);
         next_draw_time = current_time + 2000;
         Trace("[%lu/%ld] Delay: disposition=%s timing_sync_serial=%lu "
             "inflight_sync_serial=%lu\n", frame_number, current_time,
@@ -558,6 +566,8 @@ static void submit_frame(Display *d, Window w, frame_disposition disposition,
     next_draw_time = current_time + (long)(1e6f / target_frame_rate);
 
     frame_number++;
+
+    XFlush(d);
 
     begin_frame(d, w, frame_normal);
 
@@ -599,7 +609,7 @@ typedef enum { wait_retry, frame_ready, event_ready } wait_status;
  * wait for next frame
  */
 
-wait_status wait_frame(Display *d, Window w)
+wait_status wait_frame_or_event(Display *d, Window w)
 {
     current_time = get_time_microseconds();
 
@@ -617,16 +627,21 @@ wait_status wait_frame(Display *d, Window w)
             Panic("poll error: %s\n", strerror(errno));
         } else if (ret == 0) {
             return frame_ready;
-        } else if (ret == 1) {
-            if (XEventsQueued(d, QueuedAfterReading) > 0) {
-                return event_ready;
-            }
+        } else if (ret == 1 && XEventsQueued(d, QueuedAfterReading) > 0) {
+            return event_ready;
         }
 
         current_time = get_time_microseconds();
     }
 
-    return frame_ready;
+    /* we can't allow XNextEvent to block so we must always check descriptor
+     * readiness then prime the in-memory queue if returning 'event_ready' */
+    int ret = poll_event_queue(d, 0);
+    if (ret == 1 && XEventsQueued(d, QueuedAfterReading) > 0) {
+        return event_ready;
+    } else {
+        return frame_ready;
+    }
 }
 
 /*
@@ -799,14 +814,16 @@ void app_run(char* argv0)
 
     ctx = glXCreateContext(d, visinfo, NULL, True);
 
-    sync_init(d, w);
-    update_wm_supported(d, s);
-    update_wm_protocols(d, w);
-    update_wm_hints(d, w);
+    if (use_frame_sync) {
+        sync_init(d, w);
+        update_wm_supported(d, s);
+        update_wm_protocols(d, w);
+        update_wm_hints(d, w);
+        have_wm_moveresize = check_wm_supported(_NET_WM_MOVERESIZE);
+    }
 
-    have_moveresize = check_wm_supported(_NET_WM_MOVERESIZE);
-    Debug("x_extensions: have_sync=%d\n", have_sync);
-    Debug("wm_protocols: have_moveresize=%d\n", have_moveresize);
+    Debug("Capabilities: xsync_extension=%d net_supported=%d wm_moveresize=%d\n",
+        have_xsync_extension, have_net_supported, have_wm_moveresize);
 
     XStoreName(d, w, basename(argv0));
     XMapWindow(d, w);
@@ -821,22 +838,20 @@ void app_run(char* argv0)
     for (;;)
     {
         /* wait until next frame or next event */
-        do
+        while (XEventsQueued(d, QueuedAlready) == 0)
         {
-            switch (wait_frame(d, w)) {
-            case wait_retry: continue;
-            case frame_ready: submit_frame(d, w, frame_normal, frame_rate);
+            switch (wait_frame_or_event(d, w)) {
             case event_ready: goto next;
+            case frame_ready: submit_frame(d, w, frame_normal, frame_rate);
+            case wait_retry: continue;
             }
         }
-        while (XEventsQueued(d, QueuedAlready) == 0);
 next:
         /* process event queue without blocking */
-        do
+        while (XEventsQueued(d, QueuedAlready) > 0)
         {
             process_event(d, w);
         }
-        while (XEventsQueued(d, QueuedAlready) > 0);
     }
 
     XFree(supported_atoms);
@@ -851,6 +866,7 @@ int print_usage_and_exit(const char *argv0)
                     "-h, --help              print this help message\n"
                     "-d, --debug             enable debug messages\n"
                     "-t, --trace             enable trace messages\n"
+                    "-n, --no-sync           disable frame synchronization\n"
                     "-f, --frame-rate <fps>  target frame rate (default %.2f)\n\n",
         argv0, frame_rate);
     exit(9);
@@ -870,6 +886,8 @@ int main(int argc, char **argv)
             debug = trace = 1;
         } else if (match_option(argv[i], "-d", "--debug")) {
             debug = 1;
+        } else if (match_option(argv[i], "-n", "--no-sync")) {
+            use_frame_sync = 0;
         } else if (match_option(argv[i], "-f", "--frame-rate") && i+1 < argc) {
             frame_rate = atoi(argv[++i]);
         } else {

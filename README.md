@@ -40,6 +40,22 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -- --verbose
 ```
 
+## Test
+
+_glxsync_ frame synchronization can be disabled from the command-line.
+
+```
+$ gl2_xsync -h
+
+usage: ./build/gl2_xsync [options]
+
+-h, --help              print this help message
+-d, --debug             enable debug messages
+-t, --trace             enable trace messages
+-n, --no-sync           disable frame synchronization
+-f, --frame-rate <fps>  target frame rate (default 59.94)
+```
+
 ## Profile
 
 ```
