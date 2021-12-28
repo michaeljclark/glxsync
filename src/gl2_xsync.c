@@ -105,7 +105,7 @@ static bool animation = 1;
 static GLuint program;
 static mat4x4 v, p;
 static model_object_t mo[1];
-static ulong frame_rate = 30;
+static float frame_rate = 59.94;
 static ulong frame_number;
 static long last_draw_time;
 static long next_draw_time;
@@ -526,15 +526,18 @@ static void end_frame(Display *d, Window w)
  * submit frame for rendering
  */
 static void submit_frame(Display *d, Window w, frame_disposition disposition,
-    ulong target_frame_rate)
+    float target_frame_rate)
 {
-    /* sometimes a configure or expose comes before we have received
-     * frame timings from an inflight frame, where if we start another
-     * render it may result in tearing, so we skip frames. this needs
-     * to be enhanced to adapt the frame rate to the measured rate. */
-    if (timing_sync_serial && timing_sync_serial < inflight_sync_serial)
+    current_time = get_time_microseconds();
+
+    /* tearing may result if 'normal' frames are submitted before
+     * receiving timings for inflight 'urgent' frames submitted
+     * in response to synchronization requests, so we delay them. */
+    if (disposition == frame_normal && timing_sync_serial > 0 &&
+        timing_sync_serial < inflight_sync_serial)
     {
-        Trace("[%lu/%ld] Skip: disposition=%s timing_sync_serial=%lu "
+        next_draw_time = current_time + 2000;
+        Trace("[%lu/%ld] Delay: disposition=%s timing_sync_serial=%lu "
             "inflight_sync_serial=%lu\n", frame_number, current_time,
             disposition == frame_urgent ? "urgent" : "normal",
             timing_sync_serial, inflight_sync_serial);
@@ -547,13 +550,12 @@ static void submit_frame(Display *d, Window w, frame_disposition disposition,
         circular_buffer_average(&frame_time_buffer),
         circular_buffer_average(&render_time_buffer));
 
-    current_time = get_time_microseconds();
     if (last_draw_time) {
         delta_time = current_time - last_draw_time;
         circular_buffer_add(&frame_time_buffer, delta_time);
     }
     last_draw_time = current_time;
-    next_draw_time = current_time + 1000000u / target_frame_rate;
+    next_draw_time = current_time + (long)(1e6f / target_frame_rate);
 
     frame_number++;
 
@@ -645,7 +647,14 @@ void process_event(Display *d, Window w)
             Trace("[%lu/%ld] Event: Expose serial=%lu count=%d\n",
                 frame_number, current_time, e.xexpose.serial, e.xexpose.count);
 
-            submit_frame(d, w, frame_urgent, frame_rate);
+            /* cap frame rate of expose frames to measured frame rate. */
+            long frame_time_avg = circular_buffer_average(&frame_time_buffer);
+            float measured_frame_rate = 1e6f / frame_time_avg;
+            float cap_frame_rate =
+                frame_time_avg > 0 && frame_rate > measured_frame_rate ?
+                measured_frame_rate : frame_rate;
+
+            submit_frame(d, w, frame_urgent, cap_frame_rate);
             break;
         }
         case ConfigureNotify:
@@ -842,7 +851,7 @@ int print_usage_and_exit(const char *argv0)
                     "-h, --help              print this help message\n"
                     "-d, --debug             enable debug messages\n"
                     "-t, --trace             enable trace messages\n"
-                    "-f, --frame-rate <fps>  target frame rate (default %lu)\n\n",
+                    "-f, --frame-rate <fps>  target frame rate (default %.2f)\n\n",
         argv0, frame_rate);
     exit(9);
 }
