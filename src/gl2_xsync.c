@@ -540,6 +540,161 @@ static int poll_event_queue(Display *d, long timeout)
     return ppoll(pfds, array_size(pfds), &pts, NULL);
 }
 
+typedef enum { wait_retry, frame_ready, event_ready } wait_status;
+
+/*
+ * wait for next frame
+ */
+
+wait_status wait_frame(Display *d, Window w)
+{
+    current_time = get_time_microseconds();
+
+    while (current_time < next_draw_time) {
+
+        long timeout = next_draw_time - current_time;
+
+        Trace("[%lu/%ld] Poll: timeout=%ld\n",
+            frame_number, current_time, timeout);
+
+        int ret = poll_event_queue(d, timeout);
+        if (ret < 0 && errno == EINTR) {
+            return wait_retry;
+        } else if (ret < 0) {
+            Panic("poll error: %s\n", strerror(errno));
+        } else if (ret == 0) {
+            return frame_ready;
+        } else if (ret == 1) {
+            if (XEventsQueued(d, QueuedAfterReading) > 0) {
+                return event_ready;
+            }
+        }
+
+        current_time = get_time_microseconds();
+    }
+
+    return frame_ready;
+}
+
+/*
+ * process X11 event
+ */
+void process_event(Display *d, Window w)
+{
+    XEvent e;
+    long *l;
+
+    XNextEvent(d, &e);
+    current_time = get_time_microseconds();
+
+    switch (e.type)
+    {
+        case Expose:
+        {
+            Trace("[%lu/%ld] Event: Expose serial=%lu count=%d\n",
+                frame_number, current_time, e.xexpose.serial, e.xexpose.count);
+
+            submit_frame(d, w, frame_urgent, frame_rate);
+            break;
+        }
+        case ConfigureNotify:
+        {
+            width = e.xconfigure.width;
+            height = e.xconfigure.height;
+
+            configure_sync_serial = request_sync_serial;
+            configure_extended_sync = request_extended_sync;
+            request_sync_serial = 0;
+            request_extended_sync = 0;
+            sync_counter(d, extended_counter, current_sync_serial);
+
+            Trace("[%lu/%ld] Event: ConfigureNotify serial=%lu size=%dx%d "
+                "current_sync_serial=%lu request_sync_serial=%lu extended_sync=%d\n",
+                frame_number, current_time, e.xconfigure.serial,
+                width, height, current_sync_serial, configure_sync_serial,
+                configure_extended_sync);
+            break;
+        }
+        case ClientMessage:
+        {
+            l = e.xclient.data.l;
+            if (l[0] == _NET_WM_PING)
+            {
+                ulong timestamp = l[1], window = l[2];
+
+                e.xclient.window = DefaultRootWindow(d);
+                XSendEvent(d, DefaultRootWindow(d), False,
+                    SubstructureRedirectMask | SubstructureNotifyMask, &e);
+
+                Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_PING "
+                    "serial=%lu timestamp=%lu window=%lu\n",
+                    frame_number, current_time, e.xclient.serial,
+                    timestamp, window);
+            }
+            else if (l[0] == _NET_WM_SYNC_REQUEST)
+            {
+                request_sync_serial = l[2] + ((long)l[3] << 32);
+                request_extended_sync = l[4] != 0;
+
+                Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_SYNC_REQUEST "
+                    "serial=%lu sync_serial=%lu extended_sync=%d\n",
+                    frame_number, current_time, e.xclient.serial,
+                    request_sync_serial, request_extended_sync);
+            }
+            else if (e.xclient.message_type == _NET_WM_FRAME_DRAWN)
+            {
+                long drawn_time =  ((long)l[3] << 32) | l[2];
+                ulong sync_serial = ((long)l[1] << 32) | l[0];
+
+                if (sync_serial > drawn_sync_serial) {
+                    drawn_sync_serial = sync_serial;
+                }
+
+                Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_FRAME_DRAWN "
+                    "serial=%lu sync_serial=%lu drawn_time=%ld\n",
+                    frame_number, current_time, e.xclient.serial,
+                    sync_serial, drawn_time);
+            }
+            else if (e.xclient.message_type == _NET_WM_FRAME_TIMINGS)
+            {
+                int presentation_offset = l[2];
+                int refresh_interval = l[3];
+                int frame_delay = l[4];
+                ulong sync_serial = ((long)l[1] << 32) | l[0];
+
+                if (sync_serial > timing_sync_serial) {
+                    timing_sync_serial = sync_serial;
+                }
+
+                Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_FRAME_TIMINGS "
+                    "serial=%lu sync_serial=%lu presentation_offset=%u "
+                    "refresh_interval=%u frame_delay=%u\n",
+                    frame_number, current_time, e.xclient.serial,
+                    sync_serial, presentation_offset,
+                    refresh_interval, frame_delay);
+            }
+            break;
+        }
+        case PropertyNotify:
+        {
+            Trace("[%lu/%ld] Event: PropertyNotify: %s\n",
+                frame_number, current_time, XGetAtomName(d, e.xproperty.atom));
+            break;
+        }
+        default:
+        {
+            if (e.type < array_size(xevent_names)) {
+                Trace("[%lu/%ld] Event: %s\n",
+                    frame_number, current_time, xevent_names[e.type]);
+            } else {
+                Trace("[%lu/%ld] Event: (unknown-type=%d)\n",
+                    frame_number, current_time, e.type);
+            }
+            break;
+        }
+    }
+}
+
 /*
  * gl2_xsync demo
  */
@@ -551,8 +706,6 @@ void app_run(char* argv0)
     int s;
     XVisualInfo *visinfo;
     GLXContext ctx;
-    XEvent e;
-    long *l;
 
     d = XOpenDisplay(NULL);
     if (d == NULL) {
@@ -607,143 +760,23 @@ void app_run(char* argv0)
 
     for (;;)
     {
-        /* wait until next frame without blocking */
-        while (XEventsQueued(d, QueuedAlready) == 0)
+        /* wait until next frame or next event */
+        do
         {
-            current_time = get_time_microseconds();
-
-            while (current_time < next_draw_time) {
-
-                long timeout = next_draw_time - current_time;
-
-                Trace("[%lu/%ld] Poll: timeout=%ld\n",
-                    frame_number, current_time, timeout);
-
-                int ret = poll_event_queue(d, timeout);
-                if (ret < 0 && errno == EINTR) {
-                    continue;
-                } else if (ret < 0) {
-                    Panic("poll error: %s\n", strerror(errno));
-                } else if (ret == 0) {
-                    /* timedout, fallthrough to submit_frame */
-                } else if (ret == 1) {
-                    if (XEventsQueued(d, QueuedAfterReading) > 0) {
-                        goto next;
-                    }
-                }
-
-                current_time = get_time_microseconds();
+            switch (wait_frame(d, w)) {
+            case wait_retry: continue;
+            case frame_ready: submit_frame(d, w, frame_normal, frame_rate);
+            case event_ready: goto next;
             }
-
-            /* scheduled frame */
-            submit_frame(d, w, frame_normal, frame_rate);
-            goto next;
         }
-
-        /* process events without blocking */
-        while (XEventsQueued(d, QueuedAlready) > 0)
-        {
+        while (XEventsQueued(d, QueuedAlready) == 0);
 next:
-            XNextEvent(d, &e);
-            current_time = get_time_microseconds();
-
-            switch (e.type) {
-            case Expose:
-                Trace("[%lu/%ld] Event: Expose serial=%lu count=%d\n",
-                    frame_number, current_time, e.xexpose.serial, e.xexpose.count);
-
-                submit_frame(d, w, frame_urgent, frame_rate);
-                break;
-            case ConfigureNotify:
-                width = e.xconfigure.width;
-                height = e.xconfigure.height;
-
-                configure_sync_serial = request_sync_serial;
-                configure_extended_sync = request_extended_sync;
-                request_sync_serial = 0;
-                request_extended_sync = 0;
-                sync_counter(d, extended_counter, current_sync_serial);
-
-                Trace("[%lu/%ld] Event: ConfigureNotify serial=%lu size=%dx%d "
-                    "current_sync_serial=%lu request_sync_serial=%lu extended_sync=%d\n",
-                    frame_number, current_time, e.xconfigure.serial,
-                    width, height, current_sync_serial, configure_sync_serial,
-                    configure_extended_sync);
-                break;
-            case ClientMessage:
-                l = e.xclient.data.l;
-                if (l[0] == _NET_WM_PING)
-                {
-                    ulong timestamp = l[1], window = l[2];
-
-                    e.xclient.window = DefaultRootWindow(d);
-                    XSendEvent(d, DefaultRootWindow(d), False,
-                        SubstructureRedirectMask | SubstructureNotifyMask, &e);
-
-                    Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_PING "
-                        "serial=%lu timestamp=%lu window=%lu\n",
-                        frame_number, current_time, e.xclient.serial,
-                        timestamp, window);
-                }
-                else if (l[0] == _NET_WM_SYNC_REQUEST)
-                {
-                    request_sync_serial = l[2] + ((long)l[3] << 32);
-                    request_extended_sync = l[4] != 0;
-
-                    Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_SYNC_REQUEST "
-                        "serial=%lu sync_serial=%lu extended_sync=%d\n",
-                        frame_number, current_time, e.xclient.serial,
-                        request_sync_serial, request_extended_sync);
-                }
-                else if (e.xclient.message_type == _NET_WM_FRAME_DRAWN)
-                {
-                    long drawn_time =  ((long)l[3] << 32) | l[2];
-                    ulong sync_serial = ((long)l[1] << 32) | l[0];
-
-                    if (sync_serial > drawn_sync_serial) {
-                        drawn_sync_serial = sync_serial;
-                    }
-
-                    Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_FRAME_DRAWN "
-                        "serial=%lu sync_serial=%lu drawn_time=%ld\n",
-                        frame_number, current_time, e.xclient.serial,
-                        sync_serial, drawn_time);
-                }
-                else if (e.xclient.message_type == _NET_WM_FRAME_TIMINGS)
-                {
-                    int presentation_offset = l[2];
-                    int refresh_interval = l[3];
-                    int frame_delay = l[4];
-                    ulong sync_serial = ((long)l[1] << 32) | l[0];
-
-                    if (sync_serial > timing_sync_serial) {
-                        timing_sync_serial = sync_serial;
-
-                    }
-
-                    Trace("[%lu/%ld] Event: ClientMessage: _NET_WM_FRAME_TIMINGS "
-                        "serial=%lu sync_serial=%lu presentation_offset=%u "
-                        "refresh_interval=%u frame_delay=%u\n",
-                        frame_number, current_time, e.xclient.serial,
-                        sync_serial, presentation_offset,
-                        refresh_interval, frame_delay);
-                }
-                break;
-            case PropertyNotify:
-                Trace("[%lu/%ld] Event: PropertyNotify: %s\n",
-                    frame_number, current_time, XGetAtomName(d, e.xproperty.atom));
-                break;
-            default:
-                if (e.type < array_size(xevent_names)) {
-                    Trace("[%lu/%ld] Event: %s\n",
-                        frame_number, current_time, xevent_names[e.type]);
-                } else {
-                    Trace("[%lu/%ld] Event: (unknown-type=%d)\n",
-                        frame_number, current_time, e.type);
-                }
-                break;
-            }
-        };
+        /* process event queue without blocking */
+        do
+        {
+            process_event(d, w);
+        }
+        while (XEventsQueued(d, QueuedAlready) > 0);
     }
 
     XFree(supported_atoms);
