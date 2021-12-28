@@ -111,8 +111,42 @@ static long last_draw_time;
 static long next_draw_time;
 static long current_time;
 static long delta_time;
+static long render_time;
 static int width = 500, height = 500;
 static int current_width, current_height;
+
+typedef struct {
+    long sum;
+    long count;
+    long offset;
+    long samples[31];
+} circular_buffer;
+
+static circular_buffer frame_time_buffer;
+static circular_buffer render_time_buffer;
+
+static void circular_buffer_add(circular_buffer *buffer, long new_value)
+{
+    long old_value = buffer->samples[buffer->offset];
+    buffer->samples[buffer->offset] = new_value;
+    buffer->sum += new_value - old_value;
+    buffer->count++;
+    buffer->offset++;
+    if (buffer->offset >= array_size(buffer->samples)) {
+        buffer->offset = 0;
+    }
+}
+
+static long circular_buffer_average(circular_buffer *buffer)
+{
+    if (buffer->count == 0) {
+        return -1;
+    } else if (buffer->count < array_size(buffer->samples)) {
+        return buffer->sum / buffer->count;
+    } else {
+        return buffer->sum / array_size(buffer->samples);
+    }
+}
 
 static void model_object_init(model_object_t *mo)
 {
@@ -507,7 +541,17 @@ static void submit_frame(Display *d, Window w, frame_disposition disposition,
         return;
     }
 
-    delta_time = current_time - last_draw_time;
+    Trace("[%lu/%ld] FrameBegin: delta_time=%ld sync_serial=%lu "
+        "frame_avg_time=%ld render_avg_time=%ld\n",
+        frame_number, current_time, delta_time, current_sync_serial,
+        circular_buffer_average(&frame_time_buffer),
+        circular_buffer_average(&render_time_buffer));
+
+    current_time = get_time_microseconds();
+    if (last_draw_time) {
+        delta_time = current_time - last_draw_time;
+        circular_buffer_add(&frame_time_buffer, delta_time);
+    }
     last_draw_time = current_time;
     next_draw_time = current_time + 1000000u / target_frame_rate;
 
@@ -515,13 +559,20 @@ static void submit_frame(Display *d, Window w, frame_disposition disposition,
 
     begin_frame(d, w, frame_normal);
 
-    Trace("[%lu/%ld] Draw: delta_time=%ld sync_serial=%lu\n",
-        frame_number, current_time, delta_time, current_sync_serial);
-
     draw();
     glXSwapBuffers(d, w);
 
     end_frame(d, w);
+
+    current_time = get_time_microseconds();
+    render_time = current_time - last_draw_time;
+    circular_buffer_add(&render_time_buffer, render_time);
+
+    Trace("[%lu/%ld] FrameEnd: delta_time=%ld sync_serial=%lu "
+        "frame_avg_time=%ld render_avg_time=%ld\n",
+        frame_number, current_time, delta_time, current_sync_serial,
+        circular_buffer_average(&frame_time_buffer),
+        circular_buffer_average(&render_time_buffer));
 }
 
 /*
