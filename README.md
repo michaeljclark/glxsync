@@ -32,7 +32,10 @@ The demo depends on the following X11 window property atoms:
 
 ## Build
 
+_glxsync_ depends on the following libraries: _X11, Xext, GLX, GL_.
+
 ```
+sudo apt-get install libx11-dev libxext-dev libglx-dev libgl-dev
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -- --verbose
 ```
