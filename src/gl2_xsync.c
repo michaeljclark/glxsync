@@ -252,7 +252,7 @@ void reshape(int width, int height)
     uniform_matrix_4fv("u_projection", (const GLfloat *)p);
 }
 
-static void draw()
+static void draw_frame()
 {
     if (current_width != width || current_height != height) {
         reshape(width, height);
@@ -571,7 +571,7 @@ static void submit_frame(Display *d, Window w, frame_disposition disposition,
 
     begin_frame(d, w, frame_normal);
 
-    draw();
+    draw_frame();
     glXSwapBuffers(d, w);
 
     end_frame(d, w);
