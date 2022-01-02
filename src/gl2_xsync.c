@@ -57,6 +57,7 @@ static int help, debug, trace;
  * extended frame synchronization
  */
 
+static Atom WM_PROTOCOLS;
 static Atom _NET_SUPPORTED;
 static Atom _NET_WM_MOVERESIZE;
 static Atom _NET_WM_SYNC_REQUEST;
@@ -381,6 +382,7 @@ static XVisualInfo* find_glx_visual(Display *d, int s)
 
 static int init_atoms(Display *d)
 {
+    WM_PROTOCOLS = XInternAtom(d, "WM_PROTOCOLS", False);
     _NET_SUPPORTED = XInternAtom(d, "_NET_SUPPORTED", False);
     _NET_WM_MOVERESIZE = XInternAtom(d, "_NET_WM_MOVERESIZE", False);
     _NET_WM_SYNC_REQUEST = XInternAtom(d, "_NET_WM_SYNC_REQUEST", False);
@@ -389,6 +391,7 @@ static int init_atoms(Display *d)
     _NET_WM_FRAME_TIMINGS = XInternAtom(d, "_NET_WM_FRAME_TIMINGS", False);
     _NET_WM_PING = XInternAtom(d, "_NET_WM_PING", False);
 
+    assert(WM_PROTOCOLS);
     assert(_NET_SUPPORTED);
     assert(_NET_WM_MOVERESIZE);
     assert(_NET_WM_SYNC_REQUEST);
@@ -693,7 +696,7 @@ void process_event(Display *d, Window w)
         case ClientMessage:
         {
             l = e.xclient.data.l;
-            if (l[0] == _NET_WM_PING)
+            if (e.xclient.message_type == WM_PROTOCOLS && l[0] == _NET_WM_PING)
             {
                 ulong timestamp = l[1], window = l[2];
 
@@ -706,7 +709,7 @@ void process_event(Display *d, Window w)
                     frame_number, current_time, e.xclient.serial,
                     timestamp, window);
             }
-            else if (l[0] == _NET_WM_SYNC_REQUEST)
+            else if (e.xclient.message_type == WM_PROTOCOLS && l[0] == _NET_WM_SYNC_REQUEST)
             {
                 request_sync_serial = l[2] + ((long)l[3] << 32);
                 request_extended_sync = l[4] != 0;
