@@ -178,6 +178,22 @@ next:
 
 ```
 
+Frame draw interval and render times are recorded in two circular buffers:
+
+- _frame_time_buffer[31]_
+  - sampled at start of draw_frame and holds the reciprocal of the frame rate.
+    - `frame_delta = current_frame_start - last_frame_start`
+- _render_time_buffer[31]_
+  - sampled at end of swap_buffers and holds the CPU render time per frame.
+    - `render_delta = current_frame_end - current_frame_start`
+
+Presently the frame_draw delta is used to estimate the finish time of urgent
+frames to schedule the start time for resumption of paced frames. These frames
+may of course be further delayed by more urgent render requests. When capacity
+is exceeded and synchronization is enabled i.e. timing for the last frame has
+not been received, then `submit_draw` will add 2 milliseconds to the scheduled
+present time and check back then to see if it is safe to submit a new frame.
+
 ### Flow Control
 
 Flow control relates to the mechanism for response to steady state variability
