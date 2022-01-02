@@ -75,6 +75,44 @@ requests begin three phase updates:
 - extended counter set to to the _initial value plus 4_ in `end_frame` to
   indicating rendering is complete.
 
+The events for a synchronized window update look like this:
+
+- _ClientMessage_
+  - _synchronize_ (`_e.xclient.data.l[0] == _NET_WM_SYNC_REQUEST`)
+    - store synchronizatized rendering serial number:
+      - `sync_serial = _e.xclient.data.l[2]`
+- _ConfigureNotify_
+  - _resize_
+    - signal synchronizatized rendering initiated:
+      - `sync_counter(dpy, extended_counter, sync_serial + 0)`
+- _Expose_
+  - _XFlush_
+    - make sure last frame has been flushed.
+  - _draw_frame_
+    - run user code to draw the frame.
+  - _begin_frame_
+    - signal buffer contents for serial number are rendering (urgent):
+      - `sync_counter(dpy, extended_counter, sync_serial + 3)`
+  - _swap_buffers_
+    - the frame buffer contents are volatile at this point.
+  - _end_frame_
+    - signal buffer contents for serial number are now complete:
+      - `sync_counter(dpy, extended_counter, sync_serial + 4)`
+- _ClientMessage_
+  - _frame_drawn_ (`e.xclient.message_type == _NET_WM_FRAME_DRAWN`)
+    - drawing at this point is *not safe* because frame presentation
+      has not been scheduled (buffer has not been copied).
+- _ClientMessage_
+  - _frame_timings_ (`e.xclient.message_type == _NET_WM_FRAME_TIMINGS`)
+    - drawing at this point is *safe* frame because frame presentation
+      has been scheduled (buffer has been copied).
+
+Normal and urgent frames are differentiated by incrementing the extended
+counter by either _1_ or _3_.
+
+- (counter % 4 == 1) - normal frame rendering in progress.
+- (counter % 4 == 3) - urgent frame rendering in progress.
+
 See the _Frame Synchronization_ link in the references for a more complete
 description including disambiguation of basic and extended synchronization.
 
