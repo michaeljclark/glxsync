@@ -42,12 +42,12 @@ These notes outline implementation details for the following concerns:
 
 ### Extended Synchronization
 
-The primary issue causing visual artefacts during window resizing is that
-window decorations and client buffers are updated asynchronously by seperate
+The primary issue causing visual artifacts during window resizing is that
+window decorations and client buffers are updated asynchronously by separate
 agents, with the window manager responsible for updating decorations and the
 client application responsible for updating the client buffer. If the rendering
 of the decorations and the client area are not synchronized then one will see
-undrawn buffer contents in the client or decoration area.
+uninitialized buffer contents in the client or decoration area.
 
 ![configure-sync](/images/configure-sync.png)
 
@@ -56,17 +56,17 @@ supporting clients advertise to the compositor by exporting the
 `_NET_WM_SYNC_REQUEST` atom in the `_WM_PROTOCOLS` property along with
 the IDs for two XSync counters in the `_NET_WM_SYNC_REQUEST_COUNTER` property.
 
-The first counter is used for basic synchonization which is a mechanism for
+The first counter is used for basic synchronization which is a mechanism for
 synchronized updates in response to `ConfigureNotify` events. The second
-counter is used for extended synchonization, which in addition to being used
-for sycnronized updates in response to configuration changes, provides a more
-general mechanism that can be used for synchonization of regular frames.
+counter is used for extended synchronization, which in addition to being used
+for synchronized updates in response to configuration changes, provides a more
+general mechanism that can be used for synchronization of regular frames.
 
 The compositor detects clients that advertise extended synchronization from
-the presense of the two counters. The first counter is ignored when extended
+the presence of the two counters. The first counter is ignored when extended
 synchronization is being used. During window resizes the compositor sends
 `_NET_WM_SYNC_REQUEST` messages containing a synchronization serial number
-that is used to initiate syncrhonized rendering. These synchronized render
+that is used to initiate synchronized rendering. These synchronized render
 requests begin three phase updates:
 
 - serial number stored in the extended counter in the `ConfigureNotify` event.
@@ -79,11 +79,11 @@ The events for a synchronized window update look like this:
 
 - _ClientMessage_
   - _synchronize_ (`_e.xclient.data.l[0] == _NET_WM_SYNC_REQUEST`)
-    - store synchronizatized rendering serial number:
+    - store synchronized rendering serial number:
       - `sync_serial = _e.xclient.data.l[2]`
 - _ConfigureNotify_
   - _resize_
-    - signal synchronizatized rendering initiated:
+    - signal synchronized rendering initiated:
       - `sync_counter(dpy, extended_counter, sync_serial + 0)`
 - _Expose_
   - _XFlush_
@@ -118,7 +118,7 @@ description including disambiguation of basic and extended synchronization.
 
 ### Non-blocking IO
 
-A pre-requesite for extended synchronization with frame pacing is a non-blocking
+A prerequisite for extended synchronization with frame pacing is a non-blocking
 event loop. A typical X11 application eventloop calls `XNextEvent` to read
 events from the event queue but `XNextEvent` will block if the event queue is
 empty. The XLib `ConnectionNumber(dpy)` interface exists to retrieve the file
@@ -216,7 +216,7 @@ appear to make frame submission synchronous, but a clever driver is still
 capable of allowing multiple frames in flight at once by returning promises
 i.e. frame timings messages can be sent when the presentation schedule of a
 rendered frame is known which can be as soon as when the frame render has
-completed. This is a reasonable strategy for OpenGL but Vulkan renderers
+completed. This is a reasonable strategy for OpenGL but Vulkan rendering
 will likely need something more sophisticated (`_NET_WM_SYNC_FENCES`).
 
 ![xflush-offset](/images/xflush-offset.png)
