@@ -78,9 +78,10 @@ requests begin three phase updates:
 The events for a synchronized window update look like this:
 
 - _ClientMessage_
-  - _synchronize_ (`_e.xclient.data.l[0] == _NET_WM_SYNC_REQUEST`)
+  - _synchronize_ (`message_type == WM_PROTOCOLS &&
+                    data.l[0] == _NET_WM_SYNC_REQUEST`)
     - store synchronized rendering serial number:
-      - `sync_serial = _e.xclient.data.l[2]`
+      - `sync_serial = data.l[2]`
 - _ConfigureNotify_
   - _resize_
     - signal synchronized rendering initiated:
@@ -99,11 +100,11 @@ The events for a synchronized window update look like this:
     - signal buffer contents for serial number are now complete:
       - `sync_counter(dpy, extended_counter, sync_serial + 4)`
 - _ClientMessage_
-  - _frame_drawn_ (`e.xclient.message_type == _NET_WM_FRAME_DRAWN`)
+  - _frame_drawn_ (`message_type == _NET_WM_FRAME_DRAWN`)
     - drawing at this point is *not safe* because frame presentation
       has not been scheduled (buffer has not been copied).
 - _ClientMessage_
-  - _frame_timings_ (`e.xclient.message_type == _NET_WM_FRAME_TIMINGS`)
+  - _frame_timings_ (`message_type == _NET_WM_FRAME_TIMINGS`)
     - drawing at this point is *safe* frame because frame presentation
       has been scheduled (buffer has been copied).
 
