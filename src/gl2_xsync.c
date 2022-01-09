@@ -109,7 +109,7 @@ static bool animation = 1;
 static GLuint program;
 static mat4x4 v, p;
 static model_object_t mo[1];
-static float frame_rate = 59.94;
+static float frame_rate = 29.97;
 static ulong frame_number;
 static long last_draw_time;
 static long next_draw_time;
