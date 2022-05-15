@@ -570,10 +570,10 @@ static void submit_frame(Display *d, Window w, frame_disposition disposition,
 
     frame_number++;
 
-    XFlush(d);
     draw_frame();
     begin_frame(d, w, frame_normal);
     glXSwapBuffers(d, w);
+    glXWaitX();
     end_frame(d, w);
 
     current_time = get_time_microseconds();
