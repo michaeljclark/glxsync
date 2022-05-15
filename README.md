@@ -163,12 +163,11 @@ The high-level event loop looks like this:
         while (XEventsQueued(d, QueuedAlready) == 0)
         {
             switch (wait_frame_or_event(d, w)) {
-            case event_ready: goto next;
+            case event_ready: break;
             case frame_ready: submit_frame(d, w, frame_normal, frame_rate);
-            case wait_retry: continue;
             }
         }
-next:
+
         /* process event queue without blocking */
         while (XEventsQueued(d, QueuedAlready) > 0)
         {

@@ -603,7 +603,7 @@ static int poll_event_queue(Display *d, long timeout)
     return ppoll(pfds, array_size(pfds), &pts, NULL);
 }
 
-typedef enum { wait_retry, frame_ready, event_ready } wait_status;
+typedef enum { frame_ready, event_ready } wait_status;
 
 /*
  * wait for next frame
@@ -611,36 +611,28 @@ typedef enum { wait_retry, frame_ready, event_ready } wait_status;
 
 wait_status wait_frame_or_event(Display *d, Window w)
 {
-    current_time = get_time_microseconds();
-
-    while (current_time < next_draw_time) {
+    for (;;) {
+        current_time = get_time_microseconds();
 
         long timeout = next_draw_time - current_time;
+        if (timeout <= 0) return frame_ready;
 
         Trace("[%lu/%ld] Poll: timeout=%ld\n",
             frame_number, current_time, timeout);
 
         int ret = poll_event_queue(d, timeout);
+
         if (ret < 0 && errno == EINTR) {
-            return wait_retry;
+            continue;
         } else if (ret < 0) {
             Panic("poll error: %s\n", strerror(errno));
         } else if (ret == 0) {
             return frame_ready;
         } else if (ret == 1 && XEventsQueued(d, QueuedAfterReading) > 0) {
+            /* we can't allow XNextEvent to block so we must always check descriptor
+            * readiness then prime the in-memory queue if returning 'event_ready' */
             return event_ready;
         }
-
-        current_time = get_time_microseconds();
-    }
-
-    /* we can't allow XNextEvent to block so we must always check descriptor
-     * readiness then prime the in-memory queue if returning 'event_ready' */
-    int ret = poll_event_queue(d, 0);
-    if (ret == 1 && XEventsQueued(d, QueuedAfterReading) > 0) {
-        return event_ready;
-    } else {
-        return frame_ready;
     }
 }
 
@@ -841,12 +833,11 @@ void app_run(char* argv0)
         while (XEventsQueued(d, QueuedAlready) == 0)
         {
             switch (wait_frame_or_event(d, w)) {
-            case event_ready: goto next;
+            case event_ready: break;
             case frame_ready: submit_frame(d, w, frame_normal, frame_rate);
-            case wait_retry: continue;
             }
         }
-next:
+
         /* process event queue without blocking */
         while (XEventsQueued(d, QueuedAlready) > 0)
         {
