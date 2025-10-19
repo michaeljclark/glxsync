@@ -145,7 +145,7 @@ static void array_buffer_destroy(array_buffer *sb)
 
 static uint array_buffer_count(array_buffer *sb)
 {
-    return sb->count;
+    return (uint)sb->count;
 }
 
 static void* array_buffer_data(array_buffer *sb)
@@ -169,7 +169,7 @@ static uint array_buffer_add(array_buffer *sb, void *data)
         sb->capacity <<= 1;
         sb->data = (char*)realloc(sb->data, sb->stride * sb->capacity);
     }
-    uint idx = sb->count++;
+    uint idx = (uint)(sb->count++);
     memcpy(sb->data + (idx * sb->stride), data, sb->stride);
     return idx;
 }
@@ -225,12 +225,12 @@ static void vertex_buffer_dump(vertex_buffer *vb)
 
 static void index_buffer_init(index_buffer *ib)
 {
-    return array_buffer_init(ib, sizeof(uint), INDEX_BUFFER_INITIAL_COUNT);
+    array_buffer_init(ib, sizeof(uint), INDEX_BUFFER_INITIAL_COUNT);
 }
 
 static void index_buffer_destroy(index_buffer *ib)
 {
-    return array_buffer_destroy(ib);
+    array_buffer_destroy(ib);
 }
 
 static uint index_buffer_count(index_buffer *ib)
@@ -372,7 +372,7 @@ static buffer load_file(const char *filename)
     buf = (char*)malloc(statbuf.st_size);
     if ((nread = fread(buf, 1, statbuf.st_size, f)) != statbuf.st_size) {
         printf("load_file: fread: %s: expected %zu got %zu\n",
-            filename, statbuf.st_size, nread);
+            filename, (size_t)statbuf.st_size, nread);
         exit(1);
     }
     return (buffer){buf, (size_t)statbuf.st_size};
@@ -432,7 +432,7 @@ static GLuint compile_shader(GLenum type, const char *filename)
     int is_spirv;
 
     buf = load_file(filename);
-    length = buf.length;
+    length = (GLint)buf.length;
     if (!length) {
         printf("failed to load shader: %s\n", filename);
         exit(1);
@@ -513,7 +513,7 @@ static void reflect_gl4(GLuint program, GLint *numattrs, GLint *numuniforms)
 static GLuint link_program(const GLuint *shaders, GLuint numshaders,
     GLuint (*bindfn)(GLuint prog))
 {
-    GLuint program, n = 1, relink;
+    GLuint program;
     GLint status, numattrs, numuniforms;
 
     program = glCreateProgram();
@@ -597,7 +597,7 @@ static void buffer_object_create_offset(GLuint *obj, GLenum target,
 
 static void buffer_object_create(GLuint *obj, GLenum target, array_buffer *ab)
 {
-    return buffer_object_create_offset(obj, target, ab, 0, array_buffer_count(ab));
+    buffer_object_create_offset(obj, target, ab, 0, array_buffer_count(ab));
 }
 
 static void vertex_array_pointer(const char *attr, GLint size,
@@ -606,7 +606,7 @@ static void vertex_array_pointer(const char *attr, GLint size,
     GLuint val;
     if ((val = attr_list_value(&attrs, attr)) != ATTR_NOT_FOUND) {
         glEnableVertexAttribArray(val);
-        glVertexAttribPointer(val, size, type, norm, stride, (const void*)offset);
+        glVertexAttribPointer(val, size, type, norm, (GLsizei)stride, (const void*)offset);
     }
 }
 
