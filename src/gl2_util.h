@@ -103,6 +103,7 @@ static void* array_buffer_data(array_buffer *sb);
 static size_t array_buffer_size(array_buffer *sb);
 static size_t array_buffer_stride(array_buffer *sb);
 static uint array_buffer_count(array_buffer *sb);
+static void array_buffer_resize(array_buffer *sb, size_t count);
 static uint array_buffer_add(array_buffer *sb, void *data);
 
 static void vertex_buffer_init(vertex_buffer *vb);
@@ -163,15 +164,23 @@ static size_t array_buffer_size(array_buffer *sb)
     return sb->count * sb->stride;
 }
 
+static void array_buffer_resize(array_buffer *sb, size_t count)
+{
+    size_t capacity = sb->capacity;
+    while (count > capacity) capacity <<= 1;
+    if (capacity > sb->capacity) {
+        sb->data = (char*)realloc(sb->data, sb->stride * capacity);
+        sb->capacity = capacity;
+    }
+    sb->count = count;
+}
+
 static uint array_buffer_add(array_buffer *sb, void *data)
 {
-    if (sb->count >= sb->capacity) {
-        sb->capacity <<= 1;
-        sb->data = (char*)realloc(sb->data, sb->stride * sb->capacity);
-    }
-    uint idx = (uint)(sb->count++);
+    size_t idx = sb->count;
+    array_buffer_resize(sb, idx + 1);
     memcpy(sb->data + (idx * sb->stride), data, sb->stride);
-    return idx;
+    return (uint)idx;
 }
 
 static void vertex_buffer_init(vertex_buffer *vb)
