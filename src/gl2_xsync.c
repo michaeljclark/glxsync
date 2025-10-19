@@ -41,7 +41,7 @@
 #include <GL/glxext.h>
 
 #include "linmath.h"
-#include "gl2_util.h"
+#include "gl2_nano.h"
 
 typedef unsigned long ulong;
 
