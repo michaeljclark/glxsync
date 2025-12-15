@@ -305,8 +305,8 @@ X Synchronization Extension
 - https://www.x.org/releases/X11R7.7/doc/libXext/synclib.html
 
 Window Manager Protocols
-- https://specifications.freedesktop.org/wm-spec/1.4/ar01s04.html
-- https://specifications.freedesktop.org/wm-spec/1.4/ar01s06.html
+- https://specifications.freedesktop.org/wm-spec/latest/ar01s04.html
+- https://specifications.freedesktop.org/wm-spec/latest/ar01s06.html
 
 Root Window Properties
-- https://specifications.freedesktop.org/wm-spec/1.4/ar01s03.html
+- https://specifications.freedesktop.org/wm-spec/latest/ar01s03.html
