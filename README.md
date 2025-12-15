@@ -1,7 +1,7 @@
 # glxsync
 
-_glxsync_ demonstrates extended frame synchronization for OpenGL, GLX
-and Xlib apps targetting Xorg or Wayland.
+_glxsync_ extended frame synchronization for OpenGL, GLX and Xlib apps
+targetting Xorg or Wayland.
 
 ![glxsync](/images/glxsync.png)
 
